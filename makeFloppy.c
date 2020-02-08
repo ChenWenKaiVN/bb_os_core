@@ -5,27 +5,30 @@
 
 int main(int argc, char *argv[]){
 
-    printf("src %s \n", argv[1]);
-    FILE* src = fopen(argv[1], "r");
+    printf("boot %s \n", argv[1]);
+    FILE* boot = fopen(argv[1], "r");
 
-    printf("img %s \n", argv[2]);
-    FILE* img = initFloppy(argv[2]);
+    printf("kernel %s \n", argv[2]);
+    FILE* kernel = fopen(argv[2], "r");
 
-    if(src == NULL){
-	printf("The file not found");
+    printf("img %s \n", argv[3]);
+    FILE* img = initFloppy(argv[3]);
+
+    if(boot == NULL || kernel == NULL){
+	printf("The boot or kernel file not found");
 	exit(0);
     }
     
-    //写入引导扇区
+    //写引导扇区cylinder0 sector1
     char buf[512];
     memset(buf, 0, 512);
-    fread(buf, 512, 1, src);
+    fread(buf, 512, 1, boot);
     writeFloppy(0, 0, 1, img, buf);
 
-    //head0 cylinder1 sector2 写入字符串
+    //写内核 cylinder1 sector2
     memset(buf, 0, 512);
-    char str[100] = {"Hello World cylinder1 sector2"};
-    strncpy(buf, str, 100); 
+    fread(buf, 512, 1, kernel); 
     writeFloppy(1, 0, 2, img, buf);
-    fclose(src);
+    fclose(boot);
+    fclose(kernel);
 }
