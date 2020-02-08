@@ -1,6 +1,6 @@
 org  0x7c00
 
-LOAD_ADDR EQU 0x8000 ;内核代码起始处
+LOAD_ADDR EQU 0x9000 ;内核代码起始处
 
 jmp  entry
 db   0x90
