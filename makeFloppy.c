@@ -15,7 +15,7 @@ int main(int argc, char *argv[]){
     FILE* img = initFloppy(argv[3]);
 
     if(boot == NULL || kernel == NULL){
-	printf("The boot or kernel file not found");
+	printf("The boot or kernel file not found \n");
 	exit(0);
     }
     

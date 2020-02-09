@@ -118,14 +118,15 @@ SEG_CODE32:
     mov ax, SelectorVRAM
     mov ds, ax
 
-    call showChar  ;调用c语言函数
+    call kernel_main  ;调用c语言函数
 
-GLOBAL io_hlt      ;声明函数供c语言调用 void io_hlt();
-io_hlt:
-    HLT
-    RET
+;GLOBAL io_hlt      ;声明函数供c语言调用 void io_hlt();
+;io_hlt:
+;    HLT
+;    RET
 
 ;注意汇编文件引入位置 在代码段结束符之上
+%include "io.asm"
 %include "write_vram.asm"
 
 ;32位模式代码长度
