@@ -26,9 +26,12 @@ int main(int argc, char *argv[]){
     writeFloppy(0, 0, 1, img, buf);
 
     //写内核 cylinder1 sector2
-    memset(buf, 0, 512);
-    fread(buf, 512, 1, kernel); 
-    writeFloppy(1, 0, 2, img, buf);
+    for(int i=0; !feof(kernel); i++){
+        memset(buf, 0, 512);
+        fread(buf, 512, 1, kernel);
+        writeFloppy(1, 0, 2+i, img, buf);
+        printf("The %d read kernel write img sector %d \n", i+1, 2+i);
+    }
     fclose(boot);
     fclose(kernel);
 }

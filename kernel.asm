@@ -1,4 +1,4 @@
-;全局描述符结构 8字节
+; 全局描述符结构 8字节
 ; byte7 byte6 byte5 byte4 byte3 byte2 byte1 byte0
 ; byte6低四位和 byte1 byte0 表示段偏移上限
 ; byte7 byte4 byte3 byte2 表示段基址
@@ -29,6 +29,8 @@ jmp entry
 LABLE_GDT:              GDescriptor     0,        0,             0
 LABLE_DESC_CODE:        GDescriptor     0,        SegCodeLen-1,  DA_CODE + DA_32
 LABLE_DESC_VIDEO:       GDescriptor     0xb8000,  0xffff,        DA_RW                ;显存内存地址从0xB8000开始
+LABLE_DESC_STACK:       GDescriptor     0,        STACK_TOP-1,   DA_32 + DA_RW        ;函数堆栈
+LABLE_DESC_VRAM:        GDescriptor     0,        0xffffffff,    DA_RW
 
 ;GDT表大小
 GdtLen    EQU    $ - LABLE_GDT
@@ -44,6 +46,8 @@ GdtPtr dw  GdtLen-1
 
 SelectorCode32     EQU      LABLE_DESC_CODE - LABLE_GDT
 SelectorVideo      EQU      LABLE_DESC_VIDEO - LABLE_GDT
+SelectorStack      EQU      LABLE_DESC_STACK - LABLE_GDT
+SelectorVRAM       EQU      LABLE_DESC_VRAM - LABLE_GDT
 
 [SECTION .s16]
 [BITS 16]
@@ -55,6 +59,11 @@ entry:
     mov es, ax
     mov sp, 0x100
 
+    ;设置屏幕色彩模式
+    mov al, 0x13
+    mov ah, 0
+    INT 0x10
+
     ;设置LABLE_DESC_CODE描述符段基址
     mov eax, 0
     mov ax, cs
@@ -64,6 +73,16 @@ entry:
     shr eax, 16
     mov [LABLE_DESC_CODE+4], al
     mov [LABLE_DESC_CODE+7], ah
+
+    ;设置栈空间
+    xor eax, eax
+    mov ax, cs
+    shl eax, 4
+    add eax, LABLE_STACK
+    mov word [LABLE_DESC_STACK+2], ax
+    shr eax, 16
+    mov byte [LABLE_DESC_STACK+4], al
+    mov byte [LABLE_DESC_STACK+7], ah
 
     mov eax, 0
     mov ax, ds
@@ -92,39 +111,31 @@ entry:
     [BITS 32]
 
 SEG_CODE32:
-    ;将显存段基址放入gs
-    mov ax, SelectorVideo
-    mov gs, ax   ;gs 寄存器是80386新增的辅助段寄存器
+    mov ax, SelectorStack
+    mov ss, ax
+    mov esp, STACK_TOP
 
-    ;在屏幕中间显示字符串，屏幕为每行80个字符，共25行。低字节为ascii字符编码，高字节为字符显示属性
-    mov ax, (80*11+20)
-    mov ecx, 2
-    mul ecx
-    mov edi, eax  ;edi=显存位置(80*11+20)*2
-    mov ah, 0ch  ;设置字符颜色
-    
-    mov si, msg
+    mov ax, SelectorVRAM
+    mov ds, ax
 
-putloop:
-    mov al, [si]
-    cmp al, 0
-    je fin
-    ;向显存位置写数据ax 其中ax=ah+al
-    ;ah=0ch设置字符颜色
-    ;al=[si] 要显示的字符串的ASC||值
-    mov [gs:edi], ax 
-    add edi, 2
-    inc si
-    jmp putloop
+    call showChar  ;调用c语言函数
 
-fin:
+GLOBAL io_hlt      ;声明函数供c语言调用 void io_hlt();
+io_hlt:
     HLT
-    jmp fin
+    RET
 
-msg:
-    DB "Protected Mode", 0
-
-SEG_CODE32_END: nop
+;注意汇编文件引入位置 在代码段结束符之上
+%include "write_vram.asm"
 
 ;32位模式代码长度
-SegCodeLen EQU SEG_CODE32_END-SEG_CODE32
+SegCodeLen EQU $ - SEG_CODE32
+
+[SECTION .gs]
+    ALIGN 32
+    [BITS 32]
+
+LABLE_STACK:
+    TIMES 512 DB 0
+
+STACK_TOP    EQU   $ - LABLE_STACK
