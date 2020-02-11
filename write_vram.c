@@ -1,5 +1,6 @@
 #include<stdio.h>
 #include "io.h"
+#include "ascii_font.h"
 
 //定义调色板颜色
 #define  COL8_000000  0
@@ -40,12 +41,30 @@ void fillRect(int x, int y, int width, int height, char colIndex);
 //绘制桌面
 void draw_desktop();
 
+/**
+ *绘制字体
+ *@param	addr		绘制的起始显存地址
+ *@param 	x			绘制的x坐标
+ *@param	y			绘制的y坐标
+ *@param	col			绘制颜色
+ *@param	pch			绘制的字符数组8*16,每一行共8位，共16行
+ *@param	screenWidth	屏幕宽度
+ */
+void showChar(char *addr, int x, int y, char col, unsigned char *pch, int screenWidth);
+
+void draw_char();
+
+//初始化鼠标指针
+void init_mouse_cursor(char *vram, int x, int y, char bc);
+
 //C程序入口
 void kernel_main(){
     initPallet();
     //draw_simple();
     //draw_rectangle();
     draw_desktop();
+    draw_char();
+    init_mouse_cursor((char *)0xa0000, 100, 100, COL8_008484);
     for(;;){
         io_hlt();
     }
@@ -136,4 +155,88 @@ void draw_desktop(){
 
 	fillRect(SCREEN_WIDTH-47, SCREEN_HEIGHT-3, 43, 0, COL8_FFFFFF);
 	fillRect(SCREEN_WIDTH-3, SCREEN_HEIGHT-24, 0, 21, COL8_FFFFFF);
+}
+
+void showChar(char *addr, int x, int y, char col, unsigned char *pch, int screenWidth){
+    for(int i=0; i<16; i++){
+        char ch = pch[i];
+        // 对于每一个字符 8*16
+        // 从上到下 从右向左依次绘制
+        // 遍历每一位 如果1 则将显存对应位置设置为特定颜色
+        int off = (y + i) * screenWidth;
+        if((ch & 0x01) != 0){
+            addr[off+x+7] = col;
+        }
+        if((ch & 0x02) != 0){
+            addr[off+x+6] = col;
+        }
+        if((ch & 0x04) != 0){
+            addr[off+x+5] = col;
+        }
+        if((ch & 0x08) != 0){
+            addr[off+x+4] = col;
+        }
+        if((ch & 0x10) != 0){
+            addr[off+x+3] = col;
+        }
+        if((ch & 0x20) != 0){
+            addr[off+x+2] = col;
+        }
+        if((ch & 0x40) != 0){
+            addr[off+x+1] = col;
+        }
+        if((ch & 0x80) != 0){
+            addr[off+x+0] = col;
+        }
+    }
+}
+
+void draw_char(){
+    unsigned char *ascii = ascii_array;
+    int x, y = 0;
+    for(int i=0x20; i<=0x7f; i++){
+        //字符水平间隔为4 竖直间隔为8
+        x = (i - 0x20) % 32 * 10;
+        y = (i - 0x20) / 32 * 20;
+        showChar((char *)0xa0000, x, y, COL8_FFFFFF, ascii+(i-0x20)*16, SCREEN_WIDTH);
+    }
+}
+
+void init_mouse_cursor(char *vram, int x, int y, char bc){
+	//16*16 Mouse
+    //鼠标指针点阵
+	static char cursor[16][16] = {
+	 "*...............",
+	 "**..............",
+	 "*O*.............",
+	 "*OO*............",
+	 "*OOO*...........",
+	 "*OOOO*..........",
+	 "*OOOOO*.........",
+	 "*OOOOOO*........",
+	 "*OOOOOOO*.......",
+	 "*OOOO*****......",
+	 "*OO*O*..........",
+	 "*O*.*O*.........",
+	 "**..*O*.........",
+	 "*....*O*........",
+	 ".....*O*........",
+	 "......*........."
+	};
+
+	for (int i = 0; i < 16; i++) {
+		for (int j = 0; j < 16; j++) {
+			int off = (i+y)*SCREEN_WIDTH+x+j;
+			if (cursor[i][j] == '*') {
+				vram[off] = COL8_000000;
+			}
+			if (cursor[i][j] == 'O') {
+				vram[off] = COL8_FFFFFF;
+			}
+			if (cursor[i][j] == '.') {
+				vram[off] = bc;
+			}
+		}
+	}
+
 }
