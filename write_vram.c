@@ -26,6 +26,9 @@
 //屏幕高度
 #define SCREEN_HEIGHT 200
 
+//显存起始地址
+#define VGA_ADDR 0xa0000
+
 //调色板初始化
 void initPallet();
 
@@ -57,14 +60,19 @@ void draw_char();
 //初始化鼠标指针
 void init_mouse_cursor(char *vram, int x, int y, char bc);
 
+void showString(char *addr, int x, int y, char col);
+
+void int_8259A(char *index);
+
 //C程序入口
 void kernel_main(){
     initPallet();
     //draw_simple();
     //draw_rectangle();
     draw_desktop();
-    draw_char();
-    init_mouse_cursor((char *)0xa0000, 100, 100, COL8_008484);
+    //draw_char();
+    //init_mouse_cursor((char *)VGA_ADDR, 100, 100, COL8_008484);
+	//showString("Interrupt", 100, 100, COL8_FFFFFF);
     for(;;){
         io_hlt();
     }
@@ -90,7 +98,8 @@ void initPallet(){
         0x00,  0x84,  0x84,
         0x84,  0x84,  0x84,
     };
-    char *p = table_rgb;
+	// 注意此指针变量的声明
+    unsigned char *p = table_rgb;
 	//读取eflags寄存器值
     int flag = io_readFlag();
 	//关中断
@@ -99,18 +108,22 @@ void initPallet(){
     io_out8(0x03c8, 0);
 	//调色板颜色与坐标索引对应值
     for(int i=0; i<16; i++){
-        io_out8(0x0309, p[i]/4);
-        io_out8(0x0309, p[i+1]/4);
-        io_out8(0x0309, p[i+2]/4);
+        io_out8(0x03c9, p[0]/4);
+        io_out8(0x03c9, p[1]/4);
+        io_out8(0x03c9, p[2]/4);
         p += 3;
-    } 
+    }	
     //将eflags寄存器重新赋值
     io_writeFlag(flag);
+	// 开中断
+	// 此处注意开中断
+	// 在写调色板信息时关闭中断 这里要及时打开中断 否则后面中断无法响应
+	io_seti();
 }
 
 void draw_simple(){
     //显存起始地址
-    char *p = (char *)0xa0000;
+    char *p = (char *)VGA_ADDR;
     //绘制画面
     for(int i=0; i<=0xFFFF; i=i+2){
         *p = i & 0x0F;
@@ -119,7 +132,7 @@ void draw_simple(){
 }
 
 void fillRect(int x, int y, int width, int height, char colIndex){
-    char *vram = (char *)0xa0000;
+    char *vram = (char *)VGA_ADDR;
     for(int i=y; i<=y+height; i++){
         for(int j=x; j<=x+width; j++){
             vram[i*SCREEN_WIDTH+j] = colIndex;
@@ -198,7 +211,7 @@ void draw_char(){
         //字符水平间隔为4 竖直间隔为8
         x = (i - 0x20) % 32 * 10;
         y = (i - 0x20) / 32 * 20;
-        showChar((char *)0xa0000, x, y, COL8_FFFFFF, ascii+(i-0x20)*16, SCREEN_WIDTH);
+        showChar((char *)VGA_ADDR, x, y, COL8_FFFFFF, ascii+(i-0x20)*16, SCREEN_WIDTH);
     }
 }
 
@@ -239,4 +252,24 @@ void init_mouse_cursor(char *vram, int x, int y, char bc){
 		}
 	}
 
+}
+
+void showString(char *str, int x, int y, char col){
+	unsigned char *ascii = ascii_array;
+	for(; *str!=0x00; str++){
+		showChar((char *)VGA_ADDR, x, y, col, ascii+((char)*str-0x20)*16, SCREEN_WIDTH);
+		x += 8;
+	}
+}
+
+void int_8259A(char *index){
+    showString("Interrupt", 100, 100, COL8_FFFFFF);
+	/*unsigned char *ascii = ascii_array;
+	
+	for(int i=0x20;i<=0x7f;i++){
+		int x = (i-0x20)%32*10;
+		int y = (i-0x20)/32*20;
+		showChar((char *)0xa0000,x,y,COL8_FFFFFF,ascii+(i-0x20)*16,SCREEN_WIDTH);
+		
+	}*/
 }
