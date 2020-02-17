@@ -14,7 +14,7 @@ int main(int argc, char *argv[]){
         strcpy(line, "\n");
         fgets(line, sizeof(line), origin);
         if(strncmp(_extern, line, 6)==0 || strncmp(_global, line, 6)==0 || strncmp(_section, line, 7)==0){
-            printf("%s", line);
+            //printf("%s", line);
         }else{
             fputs(line, result);
         }

@@ -1,16 +1,16 @@
 #!/bin/bash
-gcc -m32 -c -fno-asynchronous-unwind-tables -fno-pic write_vram.c -o write_vram.o
-echo "gcc -m32 -c -fno-asynchronous-unwind-tables -fno-pic write_vram.c -o write_vram.o"
-./objconv -fnasm write_vram.o -o write_vram.asm
-echo "./objconv -fnasm write_vram.o -o write_vram.asm"
+gcc -m32 -c -fno-asynchronous-unwind-tables -fno-pic os.c -o os.o
+echo "gcc -m32 -c -fno-asynchronous-unwind-tables -fno-pic os.c -o os.o"
+./objconv -fnasm os.o -o os.asm
+echo "./objconv -fnasm os.o -o os.asm"
 gcc processAsm.c -o processAsm
 echo "gcc processAsm.c -o processAsm"
-./processAsm write_vram.asm write_vram_tmp.asm
-echo "./processAsm write_vram.asm write_vram_tmp.asm"
-rm -rf write_vram.asm
-echo "rm -rf write_vram.asm"
-mv write_vram_tmp.asm write_vram.asm
-echo "mv write_vram_tmp.asm write_vram.asm"
+./processAsm os.asm os_tmp.asm
+echo "./processAsm os.asm os_tmp.asm"
+rm -rf os.asm
+echo "rm -rf os.asm"
+mv os_tmp.asm os.asm
+echo "mv os_tmp.asm os.asm"
 nasm boot.asm
 echo "nasm boot.asm"
 nasm kernel.asm
@@ -19,6 +19,6 @@ gcc floppy.c makeFloppy.c -o makeFloppy
 echo "gcc floppy.c makeFloppy.c -o makeFloppy"
 ./makeFloppy boot kernel system.img
 echo "./makeFloppy boot kernel system.img"
-rm -rf boot kernel makeFloppy processAsm write_vram.asm write_vram.o
-echo "rm -rf boot kernel makeFloppy processAsm write_vram.asm write_vram.o"
+rm -rf boot kernel makeFloppy processAsm os.asm os.o
+echo "rm -rf boot kernel makeFloppy processAsm os.asm os.o"
 echo "make floppy success"

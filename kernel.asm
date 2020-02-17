@@ -20,6 +20,9 @@ DA_RW     EQU  0x92      ;读写代码段属性值
 DA_RWA    EQU  0x93      ;存在的已访问可读写数据段类型值
 
 ;中断描述符表
+;专门用于描述可执行代码所在的内存
+;offset_low 和 offset_high 合在一起作为中断函数在代码执行段中的偏移
+;selector 用来指向全局描述符表中的某个描述符，中断函数的代码就处于该描述符所指向的段中
 ;Gate selector, offset, DCount, Attr
 %macro Gate 4
     dw (%2 & 0FFFFh)
@@ -61,9 +64,21 @@ SelectorVRAM       EQU      LABLE_DESC_VRAM - LABLE_GDT
 
 ;中断描述符表
 LABLE_IDT:
-    %rep 255
+    %rep 0x21
         Gate SelectorCode32, SpuriousHandler, 0, DA_386IGate
     %endrep
+	
+	;键盘中断向量(8259A 键盘中断向量0x20,IRQ1 是键盘中断请求,0x20 + IRQ[n] = 0x21
+	.0x21:
+		Gate SelectorCode32, KeyboardHandler, 0, DA_386IGate
+		
+	%rep 10
+		Gate SelectorCode32, SpuriousHandler, 0, DA_386IGate
+	%endrep
+	
+	;从中断控制器8259A 中断向量0x28,IRQ4 是鼠标中断请求,0x28 + IRQ[n] = 0x2c
+	.0x2c:
+		Gate SelectorCode32, MouseHandler, 0, DA_386IGate
 
 IdtLen EQU $ - LABLE_IDT
 IdtPtr dw IdtLen - 1
@@ -143,41 +158,76 @@ entry:
 
 ;初始化8259A中断控制器
 init8259A:
+
+	;向主8259A发生ICW1
+	;011h 对应的二进制是00010001
+	;ICW1[0]=1表示需要发送ICW4
+	;ICW1[1] = 0,说明有级联8259A
+	;ICW1[2] =0 表示用8字节来设置中断向量号
+	;ICW1[3]=0表示中断形式是边沿触发
+	;ICW[4]必须设置为1，ICW[5,6,7]必须是0
     mov al, 011h
     out 20h, al
     call io_delay
     
+	;向从8259A发送ICW1
     out 0A0h, al
     call io_delay
 
+	;向主8259A发送ICW2
+	;20h 对应二进制00100000 
+	;ICW2[0,1,2] = 0 
+	;8259A根据被设置的起始向量号（起始向量号通过中断控制字ICW2被初始化）加上中断请求号计算出中断向量号
+	;当主8259A对应的IRQ0管线向CPU发送信号时，CPU根据0x20这个值去查找要执行的代码，
+	;，CPU根据0x21这个值去查找要执行的代码，依次类推。
     mov al, 020h
     out 021h, al
     call io_delay
 
+	;向从8259A发送ICW2
+	;28h 对应二进制00100100
+	;8259A根据被设置的起始向量号（起始向量号通过中断控制字ICW2被初始化）加上中断请求号计算出中断向量号
+	;当从8259A对应的IRQ0管线向CPU发送信号时，CPU根据0x28这个值去查找要执行的代码，
+	;IRQ1管线向CPU发送信号时，CPU根据0x29这个值去查找要执行的代码，依次类推。
     mov al, 028h
     out 0A1h, al
     call io_delay
 
+	;向主8259A发送ICW3
+	;004h 00000100
+	;ICW[2] = 1, 表示从8259A通过主IRQ2管线连接到主8259A控制器
     mov al, 004h
     out 021h, al
     call io_delay
 
+	;向从8259A 发送 ICW3
+	;ICW[0,1,2] = 2, 表示当前从片是从IRQ2管线接入主8259A芯片的
     mov al, 002h
     out 0A1h, al
     call io_delay
 
+	;向主8259A发送ICW4
+	;ICW4[0]=1表示当前CPU架构师80X86
+	;ICW4[1]=1表示自动EOI, 如果这位设置成0的话，那么中断响应后，代码要想继续处理中断，就得主动给CPU发送一个信号，
+	;如果设置成1，那么代码不用主动给CPU发送信号就可以再次处理中断。
     mov al, 002h
     out 021h, al
     call io_delay
 
+	;向从8259A发送ICW4
     out 0A1h, al
     call io_delay
 
-    mov al, 11111101b
+	;OCW(operation control word)
+	;当OCW[i] = 1 时,屏蔽对应的IRQ(i)管线的信号
+	;IRQ1对应的是键盘产生的中断
+    mov al, 11111001b
     out 021h, al
     call io_delay
 
-    mov al, 11111111b
+    ;CPU忽略所有来自从8259A芯片的信号
+	;鼠标是通过从8259A的IRQ4管线向CPU发送信号
+    mov al, 11101111b
     out 0A1h, al
     call io_delay
 
@@ -213,14 +263,53 @@ fin:
 	hlt
 	jmp fin
 
+;8259A中断控制器
 LABLE_8259A:
     SpuriousHandler EQU LABLE_8259A - $$
-    call int_8259A
     iretd
+	
+;键盘中断程序
+LabelKeyboardHandler:
+	KeyboardHandler EQU LabelKeyboardHandler - $$
+	; 注意中断切换过程
+	push es
+	push ds
+	pushad
+	mov eax, esp
+	push eax
+	
+	call int_keyboard
+	
+	pop eax
+	mov esp, eax
+	popad
+	pop ds
+	pop es
+	iretd
+	
+;鼠标中断程序
+LabelMouseHandler:
+	MouseHandler EQU LabelMouseHandler - $$
+	; 注意中断切换过程
+	push es
+	push ds
+	pushad
+	mov eax, esp
+	push eax
+	
+	call int_mouse
+	
+	pop eax
+	mov esp, eax
+	popad
+	pop ds
+	pop es
+	iretd
+
 	
 ;注意汇编文件引入位置 在代码段结束符之上
 %include "io.asm"
-%include "write_vram.asm"
+%include "os.asm"
 
 ;32位模式代码长度
 SegCodeLen EQU $ - SEG_CODE32

@@ -1,103 +1,44 @@
 #include<stdio.h>
 #include "io.h"
+#include "os.h"
 #include "ascii_font.h"
-
-//定义调色板颜色
-#define  COL8_000000  0
-#define  COL8_FF0000  1
-#define  COL8_00FF00  2
-#define  COL8_FFFF00  3
-#define  COL8_0000FF  4
-#define  COL8_FF00FF  5
-#define  COL8_00FFFF  6
-#define  COL8_FFFFFF  7
-#define  COL8_C6C6C6  8
-#define  COL8_840000  9
-#define  COL8_008400  10
-#define  COL8_848400  11
-#define  COL8_000084  12
-#define  COL8_840084  13
-#define  COL8_008484  14
-#define  COL8_848484  15
-
-//屏幕宽度
-#define SCREEN_WIDTH 320
-
-//屏幕高度
-#define SCREEN_HEIGHT 200
-
-//显存起始地址
-#define VGA_ADDR 0xa0000
-
-//调色板初始化
-void initPallet();
-
-//绘制简单图形
-void draw_simple();
-
-//绘制矩形功能
-void draw_rectangle();
-
-//绘制矩形
-void fillRect(int x, int y, int width, int height, char colIndex);
-
-//绘制桌面
-void draw_desktop();
-
-/**
- *绘制字体
- *@param	addr		绘制的起始显存地址
- *@param 	x			绘制的x坐标
- *@param	y			绘制的y坐标
- *@param	col			绘制颜色
- *@param	pch			绘制的字符数组8*16,每一行共8位，共16行
- *@param	screenWidth	屏幕宽度
- */
-void showChar(char *addr, int x, int y, char col, unsigned char *pch, int screenWidth);
-
-void draw_char();
-
-//初始化鼠标指针
-void init_mouse_cursor(char *vram, int x, int y, char bc);
-
-void showString(char *addr, int x, int y, char col);
-
-void int_8259A(char *index);
 
 //C程序入口
 void kernel_main(){
+	
+	//初始化调色板
     initPallet();
-    //draw_simple();
-    //draw_rectangle();
+
+	//绘制桌面
     draw_desktop();
-    //draw_char();
-    //init_mouse_cursor((char *)VGA_ADDR, 100, 100, COL8_008484);
-	//showString("Interrupt", 100, 100, COL8_FFFFFF);
+
+	//初始化鼠标指针
+    init_mouse_cursor((char *)VGA_ADDR, 100, 100, COL8_008484);
+	
+	//初始化鼠标电路
+	init_mouse();
+	
     for(;;){
-        io_hlt();
+		if (keybuf.len == 0) {
+			io_hlt();
+		} else {
+			io_cli();
+			static char keyval[4] = {'0','x'};
+			for(int i=0; i<keybuf.len; i++){
+				static int x = 0;
+				char2HexStr(keybuf.buf[i], keyval);
+				showString(keyval, x%SCREEN_WIDTH, x/SCREEN_WIDTH*20, COL8_FFFFFF);
+				x += 32;
+			}
+			keybuf.len = 0;
+			keybuf.next_w = 0;
+			io_seti();
+		}   
     }
 }
 
 void initPallet(){
-    //定义调色板
-    static char table_rgb[16*3] = {
-        0x00,  0x00,  0x00,
-        0xff,  0x00,  0x00,
-        0x00,  0xff,  0x00,
-        0xff,  0xff,  0x00,
-        0x00,  0x00,  0xff,
-        0xff,  0x00,  0xff,
-        0x00,  0xff,  0xff,
-        0xff,  0xff,  0xff,
-        0xc6,  0xc6,  0xc6,
-        0x84,  0x00,  0x00,
-        0x00,  0x84,  0x00,
-        0x84,  0x84,  0x00,
-        0x00,  0x00,  0x84,
-        0x84,  0x00,  0x84,
-        0x00,  0x84,  0x84,
-        0x84,  0x84,  0x84,
-    };
+
 	// 注意此指针变量的声明
     unsigned char *p = table_rgb;
 	//读取eflags寄存器值
@@ -262,14 +203,85 @@ void showString(char *str, int x, int y, char col){
 	}
 }
 
-void int_8259A(char *index){
-    showString("Interrupt", 100, 100, COL8_FFFFFF);
-	/*unsigned char *ascii = ascii_array;
+void int_keyboard(char *index){
+	//0x20是8259A控制端口
+	//0x21对应的是键盘的中断向量。当键盘中断被CPU执行后，下次键盘再向CPU发送信号时，
+	//CPU就不会接收，要想让CPU再次接收信号，必须向主PIC的端口再次发送键盘中断的中断向量号
+	io_out8(0x20, 0x21);
+	unsigned char data = io_in8(PORT_KEYDATA);
+	if (keybuf.len < KEYBUF_LEN) {
+		keybuf.buf[keybuf.next_w] = data;
+		keybuf.len++;
+		keybuf.next_w++;
+	} else {
+		keybuf.len = 0;
+		keybuf.next_w = 0;
+	}
 	
-	for(int i=0x20;i<=0x7f;i++){
-		int x = (i-0x20)%32*10;
-		int y = (i-0x20)/32*20;
-		showChar((char *)0xa0000,x,y,COL8_FFFFFF,ascii+(i-0x20)*16,SCREEN_WIDTH);
-		
-	}*/
+	// static 关键字 _stack_chk_fail
+	/*static char keyval[4] = {'0','x'};
+	char2HexStr(data, keyval);
+	static int x = 0;
+    showString(keyval, x, 100, COL8_FFFFFF);
+	x += 32;*/
+	//showString("12345", 200, 100, COL8_FFFFFF);
+}
+
+char char2HexVal(char c) {
+	if (c >= 10) {
+		return 'A' + c - 10;
+	}
+	return '0' + c;
+}
+
+void char2HexStr(unsigned char c, char *keyval){
+	char mod = c % 16;
+	keyval[3] = char2HexVal(mod);
+	c = c / 10;
+	keyval[2] = char2HexVal(c);
+}
+
+//鼠标电路对应的一个端口是 0x64, 通过读取这个端口的数据来检测鼠标电路的状态，
+//内核会从这个端口读入一个字节的数据，如果该字节的第二个比特位为0，那表明鼠标电路可以
+//接受来自内核的命令，因此，在给鼠标电路发送数据前，内核需要反复从0x64端口读取数据，
+//并检测读到数据的第二个比特位，直到该比特位为0时，才发送控制信息
+void waitKBCReady(){
+	for(;;){
+		if((io_in8(PORT_KEYSTA)&0x02)==0){
+			break;
+		}
+	}
+}
+
+//初始化键盘控制电路，鼠标控制电路是连接在键盘控制电路上，通过键盘电路实现初始化
+void init_mouse(){
+	
+	waitKBCReady();
+	
+	//0x60让键盘电路进入数据接受状态
+	io_out8(PORT_KEYCMD, KEYCMD_WRITE_MODE);
+	waitKBCReady();
+	
+	//数据0x47要求键盘电路启动鼠标模式，这样鼠标硬件所产生的数据信息，通过键盘电路端口0x60就可读到
+	io_out8(PORT_KEYDATA, KBC_MODE);
+	waitKBCReady();
+	
+	io_out8(PORT_KEYCMD, KEYCMD_SENDTO_MOUSE);
+	waitKBCReady();
+	
+	//0xf4数据激活鼠标电路，激活后将会给CPU发送中断信号
+	io_out8(PORT_KEYDATA, MOUSECMD_ENABLE);
+}
+
+void int_mouse(char *index){
+	//当中断处理后，要想再次接收中断信号，就必须向中断控制器发送一个字节的数据
+	io_out8(0x20, 0x20);
+	io_out8(0xa0, 0x20);
+	//读取鼠标数据
+	unsigned char data = io_in8(0x60);
+	static char val[4] = {'0','x'};
+	char2HexStr(data, val);
+	static int x = 0;
+    showString(val, x, 100, COL8_FFFFFF);
+	x += 32;
 }
