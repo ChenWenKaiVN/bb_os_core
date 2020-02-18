@@ -1,7 +1,13 @@
 #include<stdio.h>
-#include "io.h"
+//#include "io.h"
 #include "os.h"
 #include "ascii_font.h"
+
+static char keybuf[32];
+static char mousebuf[128];
+
+static FIFO8 keybufInfo;
+static FIFO8 mousebufInfo;
 
 //C程序入口
 void kernel_main(){
@@ -11,6 +17,9 @@ void kernel_main(){
 
 	//绘制桌面
     draw_desktop();
+	
+	fifo8_init(&keybufInfo, 32, keybuf);
+	fifo8_init(&mousebufInfo, 128, mousebuf);
 
 	//初始化鼠标指针
     init_mouse_cursor((char *)VGA_ADDR, 100, 100, COL8_008484);
@@ -19,21 +28,31 @@ void kernel_main(){
 	init_mouse();
 	
     for(;;){
-		if (keybuf.len == 0) {
-			io_hlt();
-		} else {
+		if (keybufInfo.len > 0) {
 			io_cli();
 			static char keyval[4] = {'0','x'};
-			for(int i=0; i<keybuf.len; i++){
+			for(int i=0; i<keybufInfo.len; i++){
+				char data = fifo8_get(&keybufInfo);
 				static int x = 0;
-				char2HexStr(keybuf.buf[i], keyval);
+				char2HexStr(data, keyval);
 				showString(keyval, x%SCREEN_WIDTH, x/SCREEN_WIDTH*20, COL8_FFFFFF);
 				x += 32;
 			}
-			keybuf.len = 0;
-			keybuf.next_w = 0;
 			io_seti();
-		}   
+		} else if (mousebufInfo.len > 0) {
+			io_cli();
+			static char keyval[4] = {'0','x'};
+			for(int i=0; i<mousebufInfo.len; i++){
+				char data = fifo8_get(&mousebufInfo);
+				static int x = 0;
+				char2HexStr(data, keyval);
+				showString(keyval, x%SCREEN_WIDTH, x/SCREEN_WIDTH*20, COL8_FFFFFF);
+				x += 32;
+			}
+			io_seti();
+		} else {
+			io_hlt();
+		}  
     }
 }
 
@@ -209,14 +228,15 @@ void int_keyboard(char *index){
 	//CPU就不会接收，要想让CPU再次接收信号，必须向主PIC的端口再次发送键盘中断的中断向量号
 	io_out8(0x20, 0x21);
 	unsigned char data = io_in8(PORT_KEYDATA);
-	if (keybuf.len < KEYBUF_LEN) {
+	fifo8_put(&keybufInfo, data);
+	/*if (keybuf.len < KEYBUF_LEN) {
 		keybuf.buf[keybuf.next_w] = data;
 		keybuf.len++;
 		keybuf.next_w++;
 	} else {
 		keybuf.len = 0;
 		keybuf.next_w = 0;
-	}
+	}*/
 	
 	// static 关键字 _stack_chk_fail
 	/*static char keyval[4] = {'0','x'};
@@ -278,10 +298,46 @@ void int_mouse(char *index){
 	io_out8(0x20, 0x20);
 	io_out8(0xa0, 0x20);
 	//读取鼠标数据
-	unsigned char data = io_in8(0x60);
-	static char val[4] = {'0','x'};
+	unsigned char data = io_in8(PORT_MOUSEDATA);
+	fifo8_put(&mousebufInfo, data);
+	/*static char val[4] = {'0','x'};
 	char2HexStr(data, val);
 	static int x = 0;
     showString(val, x, 100, COL8_FFFFFF);
-	x += 32;
+	x += 32;*/
+}
+
+void fifo8_init(FIFO8 *fifo, int size, char *buf){
+	fifo->buf = buf;
+	fifo->r = 0;
+	fifo->w = 0;
+	fifo->size = size;
+	fifo->len = 0;
+	fifo->flag = 0;
+}
+
+int fifo8_put(FIFO8 *fifo, char data){
+	if(fifo->len == fifo->size){
+		return -1;
+	}
+	fifo->buf[fifo->w] = data;
+	fifo->w++;
+	if(fifo->w == fifo->size){
+		fifo->w = 0;
+	}
+	fifo->len++;
+	return 0;
+}
+
+int fifo8_get(FIFO8 *fifo){
+	if(fifo->len == 0){
+		return -1;
+	}
+	int data = fifo->buf[fifo->r];
+	fifo->r++;
+	if(fifo->r == fifo->size){
+		fifo->r = 0;
+	}
+	fifo->len--;
+	return data;
 }
