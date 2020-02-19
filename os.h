@@ -108,18 +108,6 @@ void char2HexStr(unsigned char c, char *keyval);
 
 void init_mouse();
 
-// 键盘缓冲数据区
-/*struct _KeyBuf {
-	// 缓冲区数据长度
-	unsigned char buf[KEYBUF_LEN];
-	// 下一数据读/写索引
-	int next_r, next_w;
-	// 有效数据长度
-	int len;
-}KeyBuf;
-
-struct _KeyBuf keybuf = {{0},0,0,0};*/
-
 //缓冲数据区
 typedef struct _FIFO8 {
 	//指向缓冲区
@@ -133,3 +121,21 @@ void fifo8_init(FIFO8 *fifo, int size, char *buf);
 int fifo8_put(FIFO8 *fifo, char data);
 
 int fifo8_get(FIFO8 *fifo);
+
+void handleKeyInterrupt(FIFO8 *fifo);
+
+void handleMouseInterrupt(FIFO8 *fifo);
+
+//鼠标处理需要连续处理3字节
+//phase 表示处理字节阶段
+//offX, offY 当前鼠标的偏移
+//x,y 鼠标当前所在的坐标位置
+typedef struct _MouseDes{
+	char buf[3], phase;
+	int offX, offY;
+	int x, y, btn;
+}MouseDes;
+
+int mouse_decode(MouseDes *mdec, unsigned char dat);
+
+void mouseCursorMoved(MouseDes *mdec, char bc);

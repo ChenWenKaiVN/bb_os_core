@@ -1,5 +1,4 @@
 #include<stdio.h>
-//#include "io.h"
 #include "os.h"
 #include "ascii_font.h"
 
@@ -8,6 +7,9 @@ static char mousebuf[128];
 
 static FIFO8 keybufInfo;
 static FIFO8 mousebufInfo;
+
+//鼠标移动模型
+static MouseDes mouseDes;
 
 //C程序入口
 void kernel_main(){
@@ -20,9 +22,16 @@ void kernel_main(){
 	
 	fifo8_init(&keybufInfo, 32, keybuf);
 	fifo8_init(&mousebufInfo, 128, mousebuf);
+	
+	//用“.”，只需要声明一个结构体。格式是，结构体类型名+结构体名。
+	//用结构体名加“.”加域名就可以引用域。自动分配结构体的内存。如同 int a;一样。
+	//用“->”，则要声明一个结构体的指针，还要手动开辟一个该结构体的内存，然后把返回的指针给声明的结构体指针，才能用“->”正确引用
+	mouseDes.x = (SCREEN_WIDTH-16)/2;
+	mouseDes.y = (SCREEN_HEIGHT-28-16)/2;
+	mouseDes.phase = 0;
 
 	//初始化鼠标指针
-    init_mouse_cursor((char *)VGA_ADDR, 100, 100, COL8_008484);
+    init_mouse_cursor((char *)VGA_ADDR, mouseDes.x, mouseDes.y, COL8_008484);
 	
 	//初始化鼠标电路
 	init_mouse();
@@ -41,13 +50,8 @@ void kernel_main(){
 			io_seti();
 		} else if (mousebufInfo.len > 0) {
 			io_cli();
-			static char keyval[4] = {'0','x'};
-			for(int i=0; i<mousebufInfo.len; i++){
-				char data = fifo8_get(&mousebufInfo);
-				static int x = 0;
-				char2HexStr(data, keyval);
-				showString(keyval, x%SCREEN_WIDTH, x/SCREEN_WIDTH*20, COL8_FFFFFF);
-				x += 32;
+			for(int t=0;t<mousebufInfo.len;t++){
+				mouseCursorMoved(&mouseDes, COL8_008484);
 			}
 			io_seti();
 		} else {
@@ -229,22 +233,6 @@ void int_keyboard(char *index){
 	io_out8(0x20, 0x21);
 	unsigned char data = io_in8(PORT_KEYDATA);
 	fifo8_put(&keybufInfo, data);
-	/*if (keybuf.len < KEYBUF_LEN) {
-		keybuf.buf[keybuf.next_w] = data;
-		keybuf.len++;
-		keybuf.next_w++;
-	} else {
-		keybuf.len = 0;
-		keybuf.next_w = 0;
-	}*/
-	
-	// static 关键字 _stack_chk_fail
-	/*static char keyval[4] = {'0','x'};
-	char2HexStr(data, keyval);
-	static int x = 0;
-    showString(keyval, x, 100, COL8_FFFFFF);
-	x += 32;*/
-	//showString("12345", 200, 100, COL8_FFFFFF);
 }
 
 char char2HexVal(char c) {
@@ -300,11 +288,6 @@ void int_mouse(char *index){
 	//读取鼠标数据
 	unsigned char data = io_in8(PORT_MOUSEDATA);
 	fifo8_put(&mousebufInfo, data);
-	/*static char val[4] = {'0','x'};
-	char2HexStr(data, val);
-	static int x = 0;
-    showString(val, x, 100, COL8_FFFFFF);
-	x += 32;*/
 }
 
 void fifo8_init(FIFO8 *fifo, int size, char *buf){
@@ -340,4 +323,93 @@ int fifo8_get(FIFO8 *fifo){
 	}
 	fifo->len--;
 	return data;
+}
+
+void handleKeyInterrupt(FIFO8 *keybufInfo){
+	io_cli();
+	static char keyval[4] = {'0','x'};
+	for(int i=0; i<keybufInfo->len; i++){
+		char data = fifo8_get(&keybufInfo);
+		static int x = 0;
+		char2HexStr(data, keyval);
+		showString(keyval, x%SCREEN_WIDTH, x/SCREEN_WIDTH*20, COL8_FFFFFF);
+		x += 32;
+	}
+	io_seti();
+}
+
+void handleMouseInterrupt(FIFO8 *mousebufInfo){
+	io_cli();
+	static char keyval[4] = {'0','x'};
+	for(int i=0; i<mousebufInfo->len; i++){
+		char data = fifo8_get(&mousebufInfo);
+		static int x = 640;
+		char2HexStr(data, keyval);
+		showString(keyval, x%SCREEN_WIDTH, x/SCREEN_WIDTH*20, COL8_FFFFFF);
+		x += 32;
+	}
+	io_seti();
+}
+
+int mouse_decode(MouseDes *mdec, unsigned char dat){
+	int flag = -1;
+	if(mdec->phase == 0){
+		if(dat == 0xfa){
+			mdec->phase = 1;
+		}
+		flag = 0;
+	}
+	else if(mdec->phase == 1){
+		if((dat&0xc8) == 0x08){
+			mdec->buf[0] = dat;
+			mdec->phase = 2;
+		}
+		flag = 0;
+	}
+	else if(mdec->phase == 2){
+		mdec->buf[1] = dat;
+		mdec->phase = 3;
+		flag = 0;
+	}
+	else if(mdec->phase == 3){
+		mdec->buf[2] = dat;
+		mdec->phase  =1;
+		mdec->btn = mdec->buf[0]&0x07;
+		mdec->offX = mdec->buf[1];
+		mdec->offY = mdec->buf[2];
+		if((mdec->buf[0]&0x10) != 0){
+			mdec->offX |= 0xffffff00;
+		}
+		if((mdec->buf[0]&0x20) != 0){
+			mdec->offY |= 0xffffff00;
+		}
+		mdec->offY = -mdec->offY;
+		flag = 1;
+	}
+	return flag;
+}
+
+void mouseCursorMoved(MouseDes *mdec, char bc){
+	unsigned char data = fifo8_get(&mousebufInfo);
+	if(mouse_decode(mdec, data) != 0){
+		//擦除之前鼠标位置
+		fillRect(mdec->x, mdec->y, 16, 16, bc);
+		//计算鼠标新的坐标
+		mdec->x += mdec->offX;
+		mdec->y += mdec->offY;
+		if(mdec->x < 0){
+			mdec->x = 0;
+		}
+		if(mdec->x > SCREEN_WIDTH-16/2){
+			mdec->x = SCREEN_WIDTH-16/2;
+		}
+		if(mdec->y < 0){
+			mdec->y = 0;
+		}
+		if(mdec->y > SCREEN_HEIGHT-16){
+			mdec->y = SCREEN_HEIGHT-16;
+		}
+		//绘制鼠标
+		init_mouse_cursor((char *)VGA_ADDR, mdec->x, mdec->y, COL8_008484);
+	}
 }
