@@ -1,4 +1,5 @@
 #include "io.h"
+#include "kernel.h"
 
 //定义调色板颜色
 #define  COL8_000000  0
@@ -138,4 +139,8 @@ typedef struct _MouseDes{
 
 int mouse_decode(MouseDes *mdec, unsigned char dat);
 
+void showMemInfo(AddrRangeDesc *memDes, int page);
+
 void mouseCursorMoved(MouseDes *mdec, char bc);
+
+char* intToHexStr(unsigned int d);

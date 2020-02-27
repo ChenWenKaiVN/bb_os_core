@@ -1,6 +1,7 @@
 #include<stdio.h>
 #include "os.h"
 #include "ascii_font.h"
+#include "mem_util.h"
 
 static char keybuf[32];
 static char mousebuf[128];
@@ -11,6 +12,11 @@ static FIFO8 mousebufInfo;
 //鼠标移动模型
 static MouseDes mouseDes;
 
+static char keyval[4] = {'0','x'};
+
+//内存管理器
+static MEMMAN* memman;
+
 //C程序入口
 void kernel_main(){
 	
@@ -20,6 +26,7 @@ void kernel_main(){
 	//绘制桌面
     draw_desktop();
 	
+	// 初始化键盘&鼠标缓冲区
 	fifo8_init(&keybufInfo, 32, keybuf);
 	fifo8_init(&mousebufInfo, 128, mousebuf);
 	
@@ -36,17 +43,92 @@ void kernel_main(){
 	//初始化鼠标电路
 	init_mouse();
 	
+	//显示总可用内存块数量
+	int memCount = mem_block_count();
+	char2HexStr(memCount, keyval);
+	showString(keyval, 0, 0, COL8_FFFFFF);
+	
+	//中断返回内存信息首地址
+	AddrRangeDesc* memDesc = (AddrRangeDesc*)get_addr_mem_buffer();
+	
+	int y = 0;
+	int c = 0;
+	unsigned int addr;
+	unsigned int size;
+	unsigned int type;
+	int mem_total = 0;
+	for(int i=0; i<memCount; i++){
+		addr = (memDesc+i)->addrLow;
+		size = (memDesc+i)->lenLow;
+		type = (memDesc+i)->type;
+		//检测所有可用内存
+		//以1G内存为例 一共有8块 1,4块是可用内存
+		//0x00000000-0x0009FC000
+		//0x00010000-0x3FEF0000
+		if(type == 1){
+			char* pBaseAddrL = intToHexStr(addr);
+			showString(pBaseAddrL, 60, y, COL8_000000);
+			char* lenLow = intToHexStr(size);
+			showString(lenLow, 160, y, COL8_000000);
+			y += 20;
+			//找到第一块可用内存
+			// 从网上资料  直接从第三块内存开始初始化使用会报错
+			// 从第一块内存初始化内存管理器，第一块内存加入到内存管理器memman
+			// 但是第一块内存要空余4096*1024=0x8000内存用来存放最多4096个内存块
+			if(c == 0){
+				memman = (MEMMAN *)(addr);
+				memman_init(memman);
+				memman_free(memman, addr+0x8000, size-0x8000);
+				c++;
+			}else{
+				//其余的可用内存块直接放入内存管理器
+				memman_free(memman, addr, size);
+				mem_total = memman_total(memman)/1024/1024;
+				char* memTotal = intToHexStr(mem_total);
+				//显示所有可用内存 以MB为单位
+				showString("Toatl Mem: ", 60, y, COL8_000000);
+				showString(memTotal, 160, y, COL8_000000);
+				y += 20;
+			}
+		}
+	}
+	
+	//计算显示的内存块索引
+	static int count = 0;
+	//使用第三个可用内存块
+	//MEMMAN* memman = (MEMMAN *)0x00100000;
+	//MEMMAN* memman = (MEMMAN *)0x00000000;
+	//showString(memman->free, 140, 0, COL8_000000);
+	//showString("0x100000", 140, 0, COL8_000000);
+	//memman_init(memman);
+	// 4096*1024=0x8000 此部分内存用作存放内存管理器信息
+	//int c = memman_free(memman, 0x00100000+0x00008000, 0x3fef0000-0x00008000);
+	//int c = memman_free(memman, 0x00100000+0x8000, 0x1fef0000-0x8000);
+	//fillRect(0, 20, SCREEN_WIDTH, SCREEN_HEIGHT-30, COL8_008484);
+	//总可用内存数量 字节数
+	//int mem_total = memman_total(memman)/(1024*1024);
+	//char* memTotal = intToHexStr(mem_total);
+    //showString(memTotal, 140, 0, COL8_000000);
+	
     for(;;){
 		if (keybufInfo.len > 0) {
 			io_cli();
-			static char keyval[4] = {'0','x'};
-			for(int i=0; i<keybufInfo.len; i++){
+			char data = fifo8_get(&keybufInfo);
+			//回车键
+			if(data == 0x1C){
+				showMemInfo(memDesc + count, count);
+				count += 1;
+				if(count > memCount){
+					count = 0;
+				}
+			}
+			/*for(int i=0; i<keybufInfo.len; i++){
 				char data = fifo8_get(&keybufInfo);
 				static int x = 0;
 				char2HexStr(data, keyval);
 				showString(keyval, x%SCREEN_WIDTH, x/SCREEN_WIDTH*20, COL8_FFFFFF);
 				x += 32;
-			}
+			}*/
 			io_seti();
 		} else if (mousebufInfo.len > 0) {
 			io_cli();
@@ -56,7 +138,7 @@ void kernel_main(){
 			io_seti();
 		} else {
 			io_hlt();
-		}  
+		}
     }
 }
 
@@ -412,4 +494,64 @@ void mouseCursorMoved(MouseDes *mdec, char bc){
 		//绘制鼠标
 		init_mouse_cursor((char *)VGA_ADDR, mdec->x, mdec->y, COL8_008484);
 	}
+}
+
+// 32位整形数值转换为16进制
+char*  intToHexStr(unsigned int d) {
+    static char str[11];
+    str[0] = '0';
+    str[1] = 'X';
+    str[10] = 0;
+    int i = 2;
+    for(; i < 10; i++) {
+        str[i] = '0';
+    }
+    int p = 9;
+    while (p > 1 && d > 0) {
+        int e = d % 16;
+        d /= 16;
+        if (e >= 10) {
+           str[p] = 'A' + e - 10;
+        } else {
+            str[p] = '0' + e;
+        }
+        p--;		
+    } 
+    return str;
+}
+
+void showMemInfo(AddrRangeDesc *desc, int page){
+	
+	int x = 0, y = 20, t = 8*12;
+
+    fillRect(x, y, SCREEN_WIDTH, SCREEN_HEIGHT-30, COL8_008484);
+
+	showString("page is: ", x, y, COL8_000000);
+    char* pPageCnt = intToHexStr(page);
+    showString(pPageCnt, x+t, y, COL8_000000);
+	
+    y += 16;
+	showString("BaseAddrL: ", x, y, COL8_000000);
+    char* pBaseAddrL = intToHexStr(desc->addrLow);
+	showString(pBaseAddrL, x+t, y, COL8_000000);
+	
+    y += 16;
+	showString("BaseAddrH: ", x, y, COL8_000000);
+    char* pBaseAddrH = intToHexStr(desc->addrHigh);
+	showString(pBaseAddrH, x+t, y, COL8_000000);
+  
+    y += 16;
+	showString("lengthLow: ", x, y, COL8_000000);
+    char* pLengthLow = intToHexStr(desc->lenLow);
+	showString(pLengthLow, x+t, y, COL8_000000);
+
+    y+= 16;
+	showString("lengthHigh: ", x, y, COL8_000000);
+    char* pLengthHigh = intToHexStr(desc->lenHigh);
+	showString(pLengthHigh, x+t, y, COL8_000000);
+
+    y+= 16;
+	showString("type: ", x, y, COL8_000000);
+    char* pType = intToHexStr(desc->type);
+	showString(pType, x+t, y, COL8_000000);
 }

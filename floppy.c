@@ -8,9 +8,9 @@ FILE* initFloppy(char *fileName){
    memset(buf, 0, 512);
    for(int cylinder=0; cylinder<80; cylinder++){
        for(int head=0; head<2; head++){
-	   for(int sector=1; sector<=18; sector++){
-	       fwrite(buf, 512, 1, fp);
-	   }    
+		   for(int sector=1; sector<=18; sector++){
+			   fwrite(buf, 512, 1, fp);
+		   }    
        }
    }
    return fp;

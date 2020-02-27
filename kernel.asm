@@ -93,7 +93,27 @@ entry:
     mov ds, ax
     mov es, ax
     mov sp, 0x100
-
+	
+	;检测系统内存
+	mov ebx, 0
+	mov di, LABLE_MEM_BUF
+	
+LABLE_MEM_CHK_LOOP:
+	mov eax, 0xE820
+	mov ecx, 20
+	mov edx, 0x534D4150
+	INT 0x15
+	jc  LABLE_MEM_CHK_FAIL
+	add di, 20
+	inc dword [LABLE_MEM_COUNT]
+	cmp ebx, 0
+	jne LABLE_MEM_CHK_LOOP
+	jmp LABLE_MEM_CHK_OK
+	
+LABLE_MEM_CHK_FAIL:
+	mov dword [LABLE_MEM_COUNT], 0
+	
+LABLE_MEM_CHK_OK:
     ;设置屏幕色彩模式
     mov al, 0x13
     mov ah, 0
@@ -239,6 +259,15 @@ io_delay:
     nop
     nop
     ret
+	
+;检测内存数据
+LABLE_MEM_BUF:
+	times 256 db 0
+	
+;内存块数量
+;dd定义双字类型变量，一个双字数据占4个字节单元，读完一个，偏移量加4
+LABLE_MEM_COUNT:
+	dd 0
 
     [SECTION .s32]
     [BITS 32]
@@ -306,6 +335,15 @@ LabelMouseHandler:
 	pop es
 	iretd
 
+;获取内存块数量
+mem_block_count:
+	mov eax, dword [LABLE_MEM_COUNT]
+	ret
+	
+;获取内存信息数据指针
+get_addr_mem_buffer:
+	mov eax, LABLE_MEM_BUF
+	ret
 	
 ;注意汇编文件引入位置 在代码段结束符之上
 %include "io.asm"
